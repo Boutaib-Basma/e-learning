@@ -3,9 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_carousel_widget/flutter_carousel_widget.dart';
 import 'package:http/http.dart' as http;
 import 'package:mon_elearning/pages/profile_page.dart';
+import 'package:mon_elearning/pages/notification_page.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:mon_elearning/pages/all_courses.dart';
-import 'package:mon_elearning/pages/profile_page.dart';
+import 'package:fluid_bottom_nav_bar/fluid_bottom_nav_bar.dart';
 
 class Article {
   final String title;
@@ -38,14 +39,13 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _selectedIndex = 0;
   String userFirstName = 'Basma';
-  late List<Widget> _pages =[];
+  late List<Widget> _pages = [];
 
   @override
   void initState() {
     _pages = [
       const HomeContent(),
       const AllCoursesPage(),
-      Container(),
       ProfilePage(user: widget.user),
     ];
     super.initState();
@@ -61,62 +61,103 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
-      appBar: _selectedIndex == 0 
+      appBar: _selectedIndex == 0
           ? AppBar(
               backgroundColor: const Color.fromARGB(255, 255, 249, 245),
               elevation: 0,
-              title: Row(
-                children: [
-                  const SizedBox(width: 10),
-                  CircleAvatar(
-                    backgroundColor: const Color.fromARGB(255, 0, 74, 173),
-                    radius: 20,
-                    child: Text(
-                      userFirstName.substring(0, 1),
+              titleSpacing: 0, // Remove default title spacing
+              title: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16), // Match horizontal padding with content below
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      backgroundColor: const Color.fromARGB(255, 0, 74, 173),
+                      radius: 20,
+                      child: Text(
+                        userFirstName.substring(0, 1),
+                        style: const TextStyle(
+                          color: Color.fromARGB(255, 255, 252, 100),
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      'Bonjour, ${widget.user['role'] == 'parents' ? 'Ghita' : '$userFirstName'} ',
                       style: const TextStyle(
-                        color: Colors.white,
                         fontSize: 18,
+                        color: Colors.black,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 10),
-                  Text(
-                    'Bonjour, ${widget.user['role'] == Role.parents ? 'Ghita':'$userFirstName'} ',
-                    style: const TextStyle(
-                      fontSize: 18,
-                      color: Colors.black,
-                      fontWeight: FontWeight.bold,
+                  ],
+                ),
+              ),
+              actions: [
+                Container(
+                  padding: const EdgeInsets.only(right: 16), // Same right padding as content below
+                  child: GestureDetector(
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const NotificationPage(),
+                        ),
+                      );
+                    },
+                    child: Container(
+                      width: 40, // Fixed width for consistent sizing
+                      height: 40, // Fixed height to match avatar size
+                      decoration: BoxDecoration(
+                        color: const Color.fromARGB(255, 15, 64, 149),
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.grey.withOpacity(0.3),
+                            spreadRadius: 1,
+                            blurRadius: 3,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: const Icon(
+                        Icons.notifications,
+                        color: Color.fromARGB(255, 255, 252, 100),
+                        size: 24, // Consistent icon size
+                      ),
                     ),
                   ),
-                ],
-              ),
+                ),
+              ],
             )
           : null,
       body: _pages[_selectedIndex],
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _selectedIndex,
-        onTap: _onItemTapped,
-        selectedItemColor: const Color.fromARGB(255, 15, 64, 149),
-        unselectedItemColor: Colors.grey,
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home),
-            label: 'Accueil',
+      bottomNavigationBar: FluidNavBar(
+        icons: [
+          FluidNavBarIcon(
+            icon: Icons.home,
+            backgroundColor: const Color.fromARGB(255, 15, 64, 149),
           ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.search),
-            label: 'Recherche',
+          FluidNavBarIcon(
+            icon: Icons.search,
+            backgroundColor: const Color.fromARGB(255, 15, 64, 149),
           ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.notifications),
-            label: 'Alertes',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.person),
-            label: 'Profil',
+          FluidNavBarIcon(
+            icon: Icons.person,
+            backgroundColor: const Color.fromARGB(255, 15, 64, 149),
           ),
         ],
+        onChange: _onItemTapped,
+        style: FluidNavBarStyle(
+          barBackgroundColor: Colors.grey.shade200,
+          iconBackgroundColor: const Color.fromARGB(255, 254, 255, 255),
+          iconSelectedForegroundColor: const Color.fromARGB(255, 255, 252, 100),
+          iconUnselectedForegroundColor: const Color.fromARGB(255, 255, 252, 100).withOpacity(0.6),
+        ),
+        defaultIndex: _selectedIndex,
+        animationFactor: 0.8,
+        scaleFactor: 1.2,
       ),
     );
   }
@@ -132,16 +173,15 @@ class HomeContent extends StatefulWidget {
 class _HomeContentState extends State<HomeContent> {
   List<Article> articles = [];
   bool isLoading = true;
-  String _selectedCategory = 'Tous'; // Catégorie sélectionnée par défaut
+  String _selectedCategory = 'Tous';
 
-  // Liste des cours avec leurs catégories
   final List<Map<String, dynamic>> _courses = [
     {
       'title': 'Arts & Crafts',
       'description': 'How to make tubes and paper crafts',
       'image': 'assets/images/b7.png',
       'category': 'Design',
-      'progress': 3/9,
+      'progress': 3 / 9,
       'lessons': '3 of 9 lessons',
     },
     {
@@ -149,7 +189,7 @@ class _HomeContentState extends State<HomeContent> {
       'description': 'Arduino Robotics with mBot',
       'image': 'assets/images/b8.png',
       'category': 'Backend',
-      'progress': 5/8,
+      'progress': 5 / 8,
       'lessons': '5 of 8 lessons',
     },
     {
@@ -157,32 +197,8 @@ class _HomeContentState extends State<HomeContent> {
       'description': 'Algorithms with python',
       'image': 'assets/images/b7.png',
       'category': 'Backend',
-      'progress': 5/8,
+      'progress': 5 / 8,
       'lessons': '5 of 8 lessons',
-    },
-    {
-      'title': 'UI Design',
-      'description': 'Introduction to Figma',
-      'image': 'assets/images/b8.png',
-      'category': 'Design',
-      'progress': 2/6,
-      'lessons': '2 of 6 lessons',
-    },
-    {
-      'title': 'Flutter Basics',
-      'description': 'Getting started with Flutter',
-      'image': 'assets/images/b7.png',
-      'category': 'Flutter',
-      'progress': 4/7,
-      'lessons': '4 of 7 lessons',
-    },
-    {
-      'title': 'Teamwork',
-      'description': 'Effective collaboration',
-      'image': 'assets/images/b8.png',
-      'category': 'Soft Skills',
-      'progress': 1/5,
-      'lessons': '1 of 5 lessons',
     },
   ];
 
@@ -229,7 +245,6 @@ class _HomeContentState extends State<HomeContent> {
     }
   }
 
-  // Fonction pour filtrer les cours en fonction de la catégorie sélectionnée
   List<Map<String, dynamic>> get _filteredCourses {
     if (_selectedCategory == 'Tous') {
       return _courses;
@@ -254,7 +269,7 @@ class _HomeContentState extends State<HomeContent> {
         child: Text(
           text,
           style: TextStyle(
-            color: isSelected ? Colors.white : Colors.black,
+            color: isSelected ? const Color.fromARGB(255, 255, 252, 100) : Colors.black,
             fontWeight: FontWeight.w500,
           ),
         ),
@@ -271,7 +286,6 @@ class _HomeContentState extends State<HomeContent> {
       child: SingleChildScrollView(
         child: Column(
           children: [
-            // Carousel (inchangé)
             SizedBox(
               height: carouselHeight,
               child: FlutterCarousel(
@@ -284,8 +298,7 @@ class _HomeContentState extends State<HomeContent> {
                   autoPlay: true,
                   padEnds: true,
                 ),
-                items: ['assets/images/b7.png', 'assets/images/b8.png']
-                    .map((imagePath) {
+                items: ['assets/images/b7.png', 'assets/images/b8.png'].map((imagePath) {
                   return Builder(
                     builder: (BuildContext context) {
                       return Container(
@@ -312,8 +325,6 @@ class _HomeContentState extends State<HomeContent> {
                 }).toList(),
               ),
             ),
-
-            // Catégories avec filtrage fonctionnel
             Container(
               margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
               child: Column(
@@ -335,8 +346,6 @@ class _HomeContentState extends State<HomeContent> {
                 ],
               ),
             ),
-
-            // Section Cours en cours avec filtrage
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 7),
               child: Column(
@@ -351,8 +360,6 @@ class _HomeContentState extends State<HomeContent> {
                     ),
                   ),
                   const SizedBox(height: 16),
-                  
-                  // Affichage des cours filtrés
                   ..._filteredCourses.map((course) {
                     return Container(
                       margin: const EdgeInsets.only(bottom: 16),
@@ -411,7 +418,8 @@ class _HomeContentState extends State<HomeContent> {
                                         child: LinearProgressIndicator(
                                           value: course['progress'],
                                           backgroundColor: Colors.grey[200],
-                                          valueColor: const AlwaysStoppedAnimation<Color>(Color.fromARGB(255, 87, 211, 87)),
+                                          valueColor: const AlwaysStoppedAnimation<Color>(
+                                              Color.fromARGB(255, 87, 211, 87)),
                                           minHeight: 6,
                                         ),
                                       ),

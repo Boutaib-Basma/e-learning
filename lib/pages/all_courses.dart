@@ -80,6 +80,8 @@ class _AllCoursesPageState extends State<AllCoursesPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+            backgroundColor: Colors.white,
+
       appBar: AppBar(
         title: Container(
           height: 40,
@@ -258,6 +260,7 @@ class _AllCoursesPageState extends State<AllCoursesPage> {
     required String imageUrl,
   }) {
     return Card(
+      color: Colors.white,
       elevation: 3,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Column(
