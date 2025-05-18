@@ -1,9 +1,22 @@
+import 'dart:async';
+import 'dart:developer';
+import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:video_player/video_player.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/io_client.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:youtube_player_flutter/youtube_player_flutter.dart';
+import 'dart:convert';
 
 class CourseContentPage extends StatefulWidget {
   final String lessonTitle;
   final String courseTitle;
+  final String videoUrl;
+  final String lessonDescription;
+  final String lessonDuration;
+  final int? studentId;
+  final int lessonId;
+  final int courseId;
   final Function onLessonCompleted;
   final Function? onNextLesson;
 
@@ -11,6 +24,12 @@ class CourseContentPage extends StatefulWidget {
     Key? key,
     required this.lessonTitle,
     required this.courseTitle,
+    required this.videoUrl,
+    required this.lessonDescription,
+    required this.lessonDuration,
+    required this.lessonId,
+    required this.courseId,
+    this.studentId,
     required this.onLessonCompleted,
     this.onNextLesson,
   }) : super(key: key);
@@ -20,319 +39,310 @@ class CourseContentPage extends StatefulWidget {
 }
 
 class _CourseContentPageState extends State<CourseContentPage> {
-  late VideoPlayerController _controller;
+  YoutubePlayerController? _controller;
   bool _isCompleted = false;
-  bool _showControls = false;
-  bool _isFullScreen = false;
-  late Duration _currentPosition;
-  late Duration _totalDuration;
+  bool _isLoading = true;
+  String? _errorMessage;
+  Duration? _videoDuration;
+  int _lastSavedSecond = 0;
+  Timer? _progressTimer;
 
   @override
   void initState() {
     super.initState();
-    _controller = VideoPlayerController.networkUrl(Uri.parse(
-        'https://flutter.github.io/assets-for-api-docs/assets/videos/bee.mp4'))
-      ..initialize().then((_) {
-        setState(() {
-          _totalDuration = _controller.value.duration;
-          _currentPosition = _controller.value.position;
-        });
-        _controller.addListener(_updateProgress);
-      });
+    _parseDuration();
+    initializePlayer();
   }
 
-  void _updateProgress() {
-    setState(() {
-      _currentPosition = _controller.value.position;
-      _totalDuration = _controller.value.duration;
-    });
-  }
-
-  void _togglePlayPause() {
-    setState(() {
-      if (_controller.value.isPlaying) {
-        _controller.pause();
+  void _parseDuration() {
+    try {
+      final parts = widget.lessonDuration.split(':');
+      if (parts.length == 3) {
+        final hours = int.parse(parts[0]);
+        final minutes = int.parse(parts[1]);
+        final seconds = int.parse(parts[2]);
+        _videoDuration = Duration(hours: hours, minutes: minutes, seconds: seconds);
       } else {
-        _controller.play();
+        throw FormatException('Invalid duration format');
       }
-    });
-  }
-
-  void _seekForward() {
-    final newPosition = _controller.value.position + Duration(seconds: 10);
-    _controller.seekTo(newPosition > _totalDuration ? _totalDuration : newPosition);
-  }
-
-  void _seekBackward() {
-    final newPosition = _controller.value.position - Duration(seconds: 10);
-    _controller.seekTo(newPosition < Duration.zero ? Duration.zero : newPosition);
-  }
-
-  void _toggleFullScreen() {
-    if (_isFullScreen) {
-      Navigator.of(context).pop();
+    } catch (e) {
       setState(() {
-        _isFullScreen = false;
+        _errorMessage = 'Erreur de format de durée: $e';
       });
-    } else {
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (context) => Scaffold(
-            backgroundColor: Colors.black,
-            body: Center(
-              child: _buildVideoPlayer(fullScreen: true),
-            ),
-          ),
-          fullscreenDialog: true,
+      _videoDuration = const Duration(seconds: 0);
+    }
+  }
+
+  void initializePlayer() {
+    try {
+      log('Initializing YouTube player with URL: ${widget.videoUrl}');
+      String? videoId = YoutubePlayer.convertUrlToId(widget.videoUrl);
+      log('Extracted video ID: $videoId');
+      if (videoId == null) {
+        setState(() {
+          _isLoading = false;
+          _errorMessage = 'URL YouTube invalide';
+        });
+        return;
+      }
+
+      _controller = YoutubePlayerController(
+        initialVideoId: videoId,
+        flags: const YoutubePlayerFlags(
+          autoPlay: false,
+          mute: false,
+          enableCaption: true,
         ),
-      );
+      )..addListener(() {
+          if (_controller!.value.isReady) {
+            final currentPosition = _controller!.value.position;
+            final playerState = _controller!.value.playerState;
+
+            // Sauvegarder sur pause
+            if (playerState == PlayerState.paused && !_isCompleted) {
+              final currentSecond = currentPosition.inSeconds;
+              _updateLessonProgress(currentSecond);
+              _lastSavedSecond = currentSecond;
+              log('Progress saved on pause: $currentSecond seconds');
+            }
+
+            // Vérifier la complétion
+            if (!_isCompleted && _videoDuration != null && currentPosition >= _videoDuration!) {
+              setState(() {
+                _isCompleted = true;
+              });
+              widget.onLessonCompleted();
+              _updateLessonProgress(currentPosition.inSeconds);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Leçon complétée! Passage à la leçon suivante.'),
+                ),
+              );
+              _controller!.pause();
+              if (widget.onNextLesson != null) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  widget.onNextLesson!();
+                });
+              }
+            }
+          }
+          setState(() {});
+        });
+
+      // Sauvegarder la progression toutes les 5 secondes
+      _progressTimer = Timer.periodic(Duration(seconds: 5), (timer) {
+        if (_controller != null && _controller!.value.isPlaying && !_isCompleted) {
+          final currentSecond = _controller!.value.position.inSeconds;
+          _updateLessonProgress(currentSecond);
+          _lastSavedSecond = currentSecond;
+          log('Progress saved periodically: $currentSecond seconds');
+        }
+      });
+
       setState(() {
-        _isFullScreen = true;
+        _isLoading = false;
+      });
+    } catch (e) {
+      log('Error initializing player: $e');
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'Erreur d\'initialisation du lecteur: $e';
       });
     }
   }
 
-  String _formatDuration(Duration duration) {
-    String twoDigits(int n) => n.toString().padLeft(2, '0');
-    final hours = twoDigits(duration.inHours);
-    final minutes = twoDigits(duration.inMinutes.remainder(60));
-    final seconds = twoDigits(duration.inSeconds.remainder(60));
-    return [if (duration.inHours > 0) hours, minutes, seconds].join(':');
+  Future<void> _updateLessonProgress(int lastSecond) async {
+    if (widget.studentId == null) {
+      log('No studentId provided, skipping progress update API call');
+      return;
+    }
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('authToken');
+      if (token == null) {
+        log('No auth token found');
+        return;
+      }
+
+      final HttpClient client = HttpClient()
+        ..badCertificateCallback =
+            (X509Certificate cert, String host, int port) => true;
+      final ioClient = IOClient(client);
+
+      final payload = {
+        'id': 0,
+        'studentId': widget.studentId,
+        'lessonId': widget.lessonId,
+        'courseId': widget.courseId,
+        'lastSecond': lastSecond,
+        'updatedAt': DateTime.now().toUtc().toIso8601String(),
+      };
+
+      final response = await ioClient.post(
+        Uri.parse('https://192.168.1.128:5001/api/LessonProgress'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: json.encode(payload),
+      );
+
+      log('Lesson Progress Update API Response Status: ${response.statusCode}');
+      log('Lesson Progress Update API Response Body: ${response.body}');
+
+      if (response.statusCode != 200 && response.statusCode != 201) {
+        log('Failed to update lesson progress: ${response.body}');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Échec de la mise à jour du progrès: ${response.statusCode}'),
+          ),
+        );
+      } else {
+        _lastSavedSecond = lastSecond;
+      }
+    } catch (e) {
+      log('Error updating lesson progress: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Erreur lors de la mise à jour du progrès: $e'),
+        ),
+      );
+    }
   }
 
-  Widget _buildVideoPlayer({bool fullScreen = false}) {
-    return GestureDetector(
-      onTap: () {
-        setState(() {
-          _showControls = !_showControls;
-        });
-      },
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          _controller.value.isInitialized
-              ? AspectRatio(
-                  aspectRatio: fullScreen 
-                      ? MediaQuery.of(context).size.width / MediaQuery.of(context).size.height
-                      : _controller.value.aspectRatio,
-                  child: VideoPlayer(_controller),
-                )
-              : Container(
-                  height: 200,
-                  child: Center(child: CircularProgressIndicator()),
-                ),
-          if (_showControls || !_controller.value.isPlaying)
-            Container(
-              // color: Colors.black54,
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      IconButton(
-                        icon: Icon(Icons.replay_10, size: 30, color: Colors.white),
-                        onPressed: _seekBackward,
-                      ),
-                      IconButton(
-                        icon: Icon(
-                          _controller.value.isPlaying ? Icons.pause : Icons.play_arrow,
-                          size: 50,
-                          color: Colors.white,
-                        ),
-                        onPressed: _togglePlayPause,
-                      ),
-                      IconButton(
-                        icon: Icon(Icons.forward_10, size: 30, color: Colors.white),
-                        onPressed: _seekForward,
-                      ),
-                    ],
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                    child: Row(
-                      children: [
-                        Text(
-                          _formatDuration(_currentPosition),
-                          style: TextStyle(color: Colors.white),
-                        ),
-                        Expanded(
-                          child: Slider(
-                            value: _currentPosition.inSeconds.toDouble(),
-                            min: 0,
-                            max: _totalDuration.inSeconds.toDouble(),
-                            onChanged: (value) {
-                              setState(() {
-                                _currentPosition = Duration(seconds: value.toInt());
-                                _controller.seekTo(_currentPosition);
-                              });
-                            },
-                            activeColor: Colors.red,
-                            inactiveColor: Colors.grey,
-                          ),
-                        ),
-                        Text(
-                          _formatDuration(_totalDuration),
-                          style: TextStyle(color: Colors.white),
-                        ),
-                        IconButton(
-                          icon: Icon(
-                            fullScreen ? Icons.fullscreen_exit : Icons.fullscreen,
-                            color: Colors.white,
-                          ),
-                          onPressed: _toggleFullScreen,
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-        ],
-      ),
-    );
+  void _updateLessonProgressSync(int lastSecond) {
+    _updateLessonProgress(lastSecond);
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: _isFullScreen ? null : AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(widget.lessonTitle),
-            Text(
-              widget.courseTitle,
-              style: TextStyle(fontSize: 12),
-            ),
-          ],
+    return WillPopScope(
+      onWillPop: () async {
+        if (_controller != null && !_isCompleted) {
+          final currentSecond = _controller!.value.position.inSeconds;
+          await _updateLessonProgress(currentSecond);
+          log('Progress saved on back press: $currentSecond seconds');
+        }
+        return true;
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(widget.lessonTitle),
+              Text(
+                widget.courseTitle,
+                style: const TextStyle(fontSize: 12),
+              ),
+            ],
+          ),
         ),
-      ),
-      body: _isFullScreen 
-          ? _buildVideoPlayer(fullScreen: true)
-          : SingleChildScrollView(
-              child: Column(
-                children: [
-                  _buildVideoPlayer(),
-                  Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '${widget.lessonTitle} - ${widget.courseTitle}',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
+        body: SingleChildScrollView(
+          child: Column(
+            children: [
+              _buildVideoPlayer(),
+              Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${widget.lessonTitle} - ${widget.courseTitle}',
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      widget.lessonDescription,
+                      style: const TextStyle(fontSize: 16),
+                    ),
+                    const SizedBox(height: 24),
+                    if (_isCompleted && widget.onNextLesson == null)
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.green.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: Colors.green.withOpacity(0.3),
                           ),
                         ),
-                        const SizedBox(height: 8),
-                        const Text(
-                          'Dans cette leçon, vous allez apprendre les concepts fondamentaux. Suivez attentivement la vidéo et complétez la leçon pour débloquer la suite du cours.',
-                          style: TextStyle(fontSize: 16),
-                        ),
-                        const SizedBox(height: 24),
-                        if (!_isCompleted)
-                          SizedBox(
-                            width: double.infinity,
-                            child: ElevatedButton(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Color.fromARGB(255, 15, 64, 149),
-                                padding: const EdgeInsets.symmetric(vertical: 16),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                              ),
-                              onPressed: () {
-                                setState(() {
-                                  _isCompleted = true;
-                                });
-                                widget.onLessonCompleted();
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text(
-                                        'Leçon complétée! La prochaine leçon est maintenant disponible.'),
-                                  ),
-                                );
-                              },
-                              child: const Text(
-                                'Marquer comme terminé',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: const [
+                            Icon(Icons.check_circle, color: Colors.green),
+                            SizedBox(width: 8),
+                            Text(
+                              'Cours terminé!',
+                              style: TextStyle(
+                                color: Colors.green,
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
                               ),
                             ),
-                          ),
-                        if (_isCompleted)
-                          Column(
-                            children: [
-                              Container(
-                                padding: EdgeInsets.all(16),
-                                decoration: BoxDecoration(
-                                  color: Colors.green.withOpacity(0.1),
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(
-                                    color: Colors.green.withOpacity(0.3),
-                                  ),
-                                ),
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(Icons.check_circle, color: Colors.green),
-                                    SizedBox(width: 8),
-                                    Text(
-                                      'Leçon terminée!',
-                                      style: TextStyle(
-                                        color: Colors.green,
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              SizedBox(height: 20),
-                              if (widget.onNextLesson != null)
-                                SizedBox(
-                                  width: double.infinity,
-                                  child: ElevatedButton(
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.blue.shade800,
-                                      padding: const EdgeInsets.symmetric(vertical: 16),
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(12),
-                                      ),
-                                    ),
-                                    onPressed: () {
-                                      widget.onNextLesson!();
-                                    },
-                                    child: const Text(
-                                      'Leçon suivante',
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ),
-                      ],
-                    ),
-                  ),
-                ],
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
               ),
-            ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildVideoPlayer() {
+    if (_isLoading) {
+      return Container(
+        height: 200,
+        child: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (_errorMessage != null) {
+      return Container(
+        height: 200,
+        child: Center(
+          child: Text(
+            _errorMessage!,
+            style: const TextStyle(color: Colors.red, fontSize: 16),
+          ),
+        ),
+      );
+    }
+
+    return YoutubePlayer(
+      controller: _controller!,
+      showVideoProgressIndicator: true,
+      progressIndicatorColor: Colors.red,
+      progressColors: const ProgressBarColors(
+        playedColor: Colors.red,
+        handleColor: Colors.redAccent,
+      ),
+      onReady: () {
+        log('YouTube player ready');
+      },
     );
   }
 
   @override
   void dispose() {
-    _controller.removeListener(_updateProgress);
-    _controller.dispose();
+    _progressTimer?.cancel();
+    if (_controller != null && _controller!.value.isReady && !_isCompleted) {
+      final currentSecond = _controller!.value.position.inSeconds;
+      if (currentSecond > 0) {
+        _updateLessonProgressSync(currentSecond);
+        log('Progress saved on dispose: $currentSecond seconds');
+      }
+    }
+    _controller?.dispose();
     super.dispose();
   }
 }

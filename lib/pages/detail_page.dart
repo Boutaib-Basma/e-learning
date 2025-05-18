@@ -1,5 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/io_client.dart';
+import 'dart:io';
+import 'dart:convert';
 import './course_content.dart';
+import 'package:youtube_player_flutter/youtube_player_flutter.dart';
 
 class DetailPage extends StatefulWidget {
   final String title;
@@ -8,6 +13,7 @@ class DetailPage extends StatefulWidget {
   final String instructor;
   final double rating;
   final int lessonCount;
+  final int courseId;
 
   const DetailPage({
     Key? key,
@@ -17,6 +23,7 @@ class DetailPage extends StatefulWidget {
     this.instructor = "John Doe",
     this.rating = 4.5,
     this.lessonCount = 10,
+    required this.courseId,
   }) : super(key: key);
 
   @override
@@ -24,18 +31,68 @@ class DetailPage extends StatefulWidget {
 }
 
 class _DetailPageState extends State<DetailPage> {
-  // Liste des leçons avec leur état de déverrouillage
-  final List<Map<String, dynamic>> _lessons = [
-    {'title': 'Introduction', 'unlocked': true, 'completed': false},
-    {'title': 'Installation', 'unlocked': true, 'completed': false},
-    {'title': 'Premiers pas', 'unlocked': false, 'completed': false},
-    {'title': 'Widgets', 'unlocked': false, 'completed': false},
-    {'title': 'State', 'unlocked': false, 'completed': false},
-  ];
+  List<Map<String, dynamic>> _lessons = [];
+  bool _isLoadingLessons = true;
+  String _errorMessage = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchLessons();
+  }
+
+  Future<void> _fetchLessons() async {
+    try {
+      final HttpClient client = HttpClient()
+        ..badCertificateCallback =
+            (X509Certificate cert, String host, int port) => true;
+
+      final ioClient = IOClient(client);
+
+      final response = await ioClient.get(
+        Uri.parse('https://192.168.1.128:5001/course/${widget.courseId}'),
+        headers: {'Accept': 'application/json'},
+      );
+
+      if (response.statusCode == 200) {
+        final List<dynamic> lessonsData = json.decode(response.body);
+
+        setState(() {
+          _lessons = lessonsData.map((lesson) {
+            String url = lesson['url'] ?? '';
+            bool isValidYouTubeUrl = YoutubePlayer.convertUrlToId(url) != null;
+            return {
+              'lessonId': lesson['lessonId'] ?? 0,
+              'title': lesson['titre'] ?? 'Leçon sans titre',
+              'unlocked': _lessons.isEmpty ? true : false,
+              'completed': false,
+              'url': url,
+              'description': lesson['description'] ?? 'Aucune description disponible',
+              'duration': lesson['duration'] ?? 'Durée inconnue',
+              'isValidUrl': isValidYouTubeUrl,
+            };
+          }).toList();
+          if (_lessons.any((lesson) => !lesson['isValidUrl'])) {
+            _errorMessage = 'Certaines leçons ont des URLs YouTube invalides';
+          }
+          _isLoadingLessons = false;
+        });
+      } else {
+        setState(() {
+          _isLoadingLessons = false;
+          _errorMessage = 'Erreur de chargement des leçons: ${response.statusCode}';
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _isLoadingLessons = false;
+        _errorMessage = 'Erreur de connexion: $e';
+      });
+    }
+  }
 
   int get completedLessons => _lessons.where((l) => l['completed']).length;
 
-  // Fonction pour débloquer la leçon suivante
   void _unlockNextLesson(int currentIndex) {
     if (currentIndex < _lessons.length - 1) {
       setState(() {
@@ -100,8 +157,7 @@ class _DetailPageState extends State<DetailPage> {
                         ),
                       ),
                       Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 4),
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
                           color: const Color.fromARGB(255, 87, 211, 87),
                           borderRadius: BorderRadius.circular(12),
@@ -153,7 +209,7 @@ class _DetailPageState extends State<DetailPage> {
                               ),
                             ),
                             Text(
-                              '$completedLessons/${widget.lessonCount} leçons',
+                              '$completedLessons/${_lessons.length} leçons',
                               style: TextStyle(
                                 color: Colors.grey[600],
                                 fontSize: 12,
@@ -165,7 +221,9 @@ class _DetailPageState extends State<DetailPage> {
                         ClipRRect(
                           borderRadius: BorderRadius.circular(3),
                           child: LinearProgressIndicator(
-                            value: completedLessons / widget.lessonCount,
+                            value: _lessons.isEmpty
+                                ? 0
+                                : completedLessons / _lessons.length,
                             backgroundColor: Colors.grey[200],
                             valueColor: const AlwaysStoppedAnimation<Color>(
                                 Color.fromARGB(255, 87, 211, 87)),
@@ -203,17 +261,28 @@ class _DetailPageState extends State<DetailPage> {
                       ),
                     ),
                   ),
-                  ..._lessons.asMap().entries.map((entry) {
-                    final index = entry.key;
-                    final lesson = entry.value;
-                    return _buildLessonItem(
-                      context,
-                      lesson['title'],
-                      lesson['unlocked'],
-                      lesson['completed'] ? Icons.check_circle : Icons.play_circle_fill,
-                      index,
-                    );
-                  }).toList(),
+                  if (_isLoadingLessons)
+                    const Center(child: CircularProgressIndicator())
+                  else if (_errorMessage.isNotEmpty)
+                    Text(
+                      _errorMessage,
+                      style: const TextStyle(color: Colors.red),
+                    )
+                  else if (_lessons.isEmpty)
+                    const Text('Aucune leçon disponible')
+                  else
+                    ..._lessons.asMap().entries.map((entry) {
+                      final index = entry.key;
+                      final lesson = entry.value;
+                      return _buildLessonItem(
+                        context,
+                        lesson['title'],
+                        lesson['unlocked'],
+                        lesson['completed'] ? Icons.check_circle : Icons.play_circle_fill,
+                        index,
+                        lesson['isValidUrl'],
+                      );
+                    }).toList(),
                 ],
               ),
             ),
@@ -229,26 +298,40 @@ class _DetailPageState extends State<DetailPage> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                   ),
-                  onPressed: () {
-                    // Trouver la première leçon non complétée et déverrouillée
-                    final nextLesson = _lessons.firstWhere(
-                      (l) => l['unlocked'] && !l['completed'],
-                      orElse: () => _lessons.last,
-                    );
-                    
-                    if (nextLesson['unlocked']) {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => CourseContentPage(
-                            lessonTitle: nextLesson['title'],
-                            courseTitle: widget.title,
-                            onLessonCompleted: () => _unlockNextLesson(_lessons.indexOf(nextLesson)),
-                          ),
-                        ),
-                      );
-                    }
-                  },
+                  onPressed: _lessons.isEmpty
+                      ? null
+                      : () {
+                          final nextLesson = _lessons.firstWhere(
+                            (l) => l['unlocked'] && !l['completed'],
+                            orElse: () => _lessons.last,
+                          );
+
+                          if (nextLesson['unlocked']) {
+                            if (nextLesson['isValidUrl']) {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => CourseContentPage(
+                                    lessonTitle: nextLesson['title'],
+                                    courseTitle: widget.title,
+                                    videoUrl: nextLesson['url'],
+                                    lessonDescription: nextLesson['description'],
+                                    lessonDuration: nextLesson['duration'],
+                                    lessonId: nextLesson['lessonId'],
+                                    courseId: widget.courseId,
+                                    onLessonCompleted: () => _unlockNextLesson(_lessons.indexOf(nextLesson)),
+                                  ),
+                                ),
+                              );
+                            } else {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('URL de la leçon invalide. Veuillez vérifier.'),
+                                ),
+                              );
+                            }
+                          }
+                        },
                   child: const Text(
                     'Continuer la formation',
                     style: TextStyle(
@@ -266,9 +349,16 @@ class _DetailPageState extends State<DetailPage> {
     );
   }
 
-  Widget _buildLessonItem(BuildContext context, String title, bool isUnlocked, IconData icon, int index) {
+  Widget _buildLessonItem(
+    BuildContext context,
+    String title,
+    bool isUnlocked,
+    IconData icon,
+    int index,
+    bool isValidUrl,
+  ) {
     return GestureDetector(
-      onTap: isUnlocked
+      onTap: isUnlocked && isValidUrl
           ? () {
               Navigator.push(
                 context,
@@ -276,12 +366,25 @@ class _DetailPageState extends State<DetailPage> {
                   builder: (context) => CourseContentPage(
                     lessonTitle: title,
                     courseTitle: widget.title,
+                    videoUrl: _lessons[index]['url'],
+                    lessonDescription: _lessons[index]['description'],
+                    lessonDuration: _lessons[index]['duration'],
+                    lessonId: _lessons[index]['lessonId'],
+                    courseId: widget.courseId,
                     onLessonCompleted: () => _unlockNextLesson(index),
                   ),
                 ),
               );
             }
-          : null,
+          : () {
+              if (isUnlocked && !isValidUrl) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('URL de la leçon invalide. Veuillez vérifier.'),
+                  ),
+                );
+              }
+            },
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),
         padding: const EdgeInsets.all(12),
@@ -302,21 +405,44 @@ class _DetailPageState extends State<DetailPage> {
             Icon(
               icon,
               color: isUnlocked
-                  ? const Color.fromARGB(255, 87, 211, 87)
+                  ? (isValidUrl
+                      ? const Color.fromARGB(255, 87, 211, 87)
+                      : Colors.red)
                   : Colors.grey[400],
               size: 24,
             ),
             const SizedBox(width: 12),
             Expanded(
-              child: Text(
-                title,
-                style: TextStyle(
-                  fontWeight: FontWeight.w500,
-                  color: isUnlocked ? Colors.black : Colors.grey[500],
-                ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w500,
+                      color: isUnlocked ? Colors.black : Colors.grey[500],
+                    ),
+                  ),
+                  if (_lessons[index]['duration'] != null)
+                    Text(
+                      _lessons[index]['duration'],
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey[500],
+                      ),
+                    ),
+                  if (!isValidUrl)
+                    const Text(
+                      'URL invalide',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.red,
+                      ),
+                    ),
+                ],
               ),
             ),
-            if (isUnlocked)
+            if (isUnlocked && isValidUrl)
               const Icon(
                 Icons.chevron_right,
                 color: Colors.grey,

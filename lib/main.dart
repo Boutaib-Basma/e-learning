@@ -3,8 +3,10 @@ import 'dart:developer';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
+import 'package:mon_elearning/pages/mdp_oublie.dart';
+import 'package:mon_elearning/pages/mes_enfants.dart';
 import 'package:mon_elearning/pages/navigation_bar.dart';
-import 'package:mon_elearning/pages/welcome_page.dart';
+import 'package:mon_elearning/pages/welcome_logo.dart';
 import 'package:mon_elearning/pages/onboarding_screen.dart';
 import 'package:mon_elearning/pages/inscription.dart';
 import 'package:mon_elearning/pages/connexion.dart' as cn; // Importation de la page SignInPage
@@ -12,6 +14,7 @@ import 'package:mon_elearning/pages/profile_page.dart'; // Importation de la pag
 import 'package:mon_elearning/utils/constantes.dart';
 import 'package:mon_elearning/utils/firebase_notification.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 
 void main() async {
 WidgetsFlutterBinding.ensureInitialized();
@@ -35,18 +38,18 @@ class _MyAppState extends State<MyApp> {
   
   Future<Widget> _getInitialScreen() async {
     final prefs = await SharedPreferences.getInstance();
-    final email = prefs.getString('userEmail');
-    final role = prefs.getString('userRole');
-    final name = prefs.getString('userName');
+    final authToken = prefs.getString('authToken');
 
-    if (email != null && role != null && name != null) {
+    if (authToken!= null) {
+     final Map<String, dynamic> userInfo=  decodeJwtPayload(authToken);
+      log(userInfo.toString());
       return HomeScreen(user: {
-        'email': email,
-        'name': name,
-        'role': role == 'Role.parents' ? Role.parents : Role.students
+        'email': userInfo['email'],
+        'id': userInfo['nameid'],
+        'role': userInfo['role']
       });
     }
-    return WelcomePage(seconds: 2);
+    return WelcomeLogoPage();
   }
 @override
   void initState() {
@@ -65,7 +68,7 @@ class _MyAppState extends State<MyApp> {
             theme: appTheme,
             title: 'Mon E-Learning',
             debugShowCheckedModeBanner: false,
-            home: snapshot.data ?? WelcomePage(seconds: 2),
+            home: snapshot.data ?? WelcomeLogoPage(),
             routes: {
               '/onboarding': (context) => OnboardingScreen(),
               '/login': (context) => cn.SignInPage(), // Page de connexion
@@ -73,11 +76,35 @@ class _MyAppState extends State<MyApp> {
                   user: ModalRoute.of(context)!.settings.arguments
                       as Map<String, dynamic>),
               '/signup': (context) => const SignUpPage(),
+              '/mdp_oublie': (context) => const ForgotPasswordPage(),
+              '/mes_enfants': (context) => const MesEnfantsPage(),
             },
           );
         }
         return const CircularProgressIndicator();
       },
     );
+  }
+}
+
+
+
+Map<String, dynamic> decodeJwtPayload(String token) {
+  try {
+    final parts = token.split('.');
+    if (parts.length != 3) {
+      throw FormatException('Invalid JWT structure');
+    }
+
+    final payload = parts[1];
+    
+    // Base64 decoding (with padding fix)
+    String normalized = base64Url.normalize(payload);
+    final decoded = utf8.decode(base64Url.decode(normalized));
+
+    return json.decode(decoded) as Map<String, dynamic>;
+  } catch (e) {
+    print('Error decoding JWT: $e');
+    return {};
   }
 }

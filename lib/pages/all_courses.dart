@@ -1,5 +1,130 @@
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/io_client.dart';
+import 'dart:io';
+import 'dart:convert';
 import 'detail_page.dart';
+
+class Category {
+  final int id;
+  final String name;
+  final IconData icon;
+  final Color color;
+
+  Category({
+    required this.id,
+    required this.name,
+    required this.icon,
+    required this.color,
+  });
+
+  factory Category.fromJson(Map<String, dynamic> json) {
+    return Category(
+      id: json['id'] as int,
+      name: json['categoryName'] as String,
+      icon: _getIconFromName(json['categoryName'] ?? ''),
+      color: _getColorFromName(json['categoryName'] ?? ''),
+    );
+  }
+
+  static IconData _getIconFromName(String name) {
+    switch (name.toLowerCase()) {
+      case 'ui':
+        return Icons.design_services;
+      case 'business':
+        return Icons.business;
+      case 'lifestyle':
+        return Icons.spa;
+      case 'marketing':
+        return Icons.trending_up;
+      case 'ux':
+        return Icons.psychology;
+      case 'social':
+        return Icons.people;
+      default:
+        return Icons.category;
+    }
+  }
+
+  static Color _getColorFromName(String name) {
+    switch (name.toLowerCase()) {
+      case 'ui':
+        return const Color(0xFFFFF2E6);
+      case 'business':
+        return const Color(0xFFE6F7FF);
+      case 'lifestyle':
+        return const Color(0xFFF0FFE6);
+      case 'marketing':
+        return const Color(0xFFFFE6F7);
+      case 'ux':
+        return const Color(0xFFF0E6FF);
+      case 'social':
+        return const Color(0xFFFFF7E6);
+      default:
+        return const Color(0xFFE6E6E6);
+    }
+  }
+}
+
+class Course {
+  final int id;
+  final String courseName;
+  final String courseDescription;
+  final String duration;
+  final String level;
+  final String imageCourse;
+  final String formateur;
+  final int formateurId;
+  final String category;
+  final DateTime created;
+  final DateTime updated;
+
+  Course({
+    required this.id,
+    required this.courseName,
+    required this.courseDescription,
+    required this.duration,
+    required this.level,
+    required this.imageCourse,
+    required this.formateur,
+    required this.formateurId,
+    required this.category,
+    required this.created,
+    required this.updated,
+  });
+
+  factory Course.fromJson(Map<String, dynamic> json) {
+    return Course(
+      id: json['id'] ?? 0,
+      courseName: json['courseName'] ?? 'No Title',
+      courseDescription: json['courseDescription'] ?? 'No Description',
+      duration: json['duration'] ?? 'Unknown',
+      level: json['level'] ?? 'Unknown',
+      imageCourse: json['imageCourse'] ?? 'assets/images/b7.png',
+      formateur: json['formateur'] ?? 'Unknown',
+      formateurId: json['formateurId'] ?? 0, // Corrected typo: 'fourmateurId' to 'formateurId'
+      category: json['category'] ?? 'Unknown',
+      created: DateTime.tryParse(json['created'] ?? '') ?? DateTime.now(),
+      updated: DateTime.tryParse(json['updated'] ?? '') ?? DateTime.now(),
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'courseName': courseName,
+      'courseDescription': courseDescription,
+      'duration': duration,
+      'level': level,
+      'imageCourse': imageCourse,
+      'formateur': formateur,
+      'formateurId': formateurId,
+      'category': category,
+      'created': created.toIso8601String(),
+      'updated': updated.toIso8601String(),
+    };
+  }
+}
 
 class AllCoursesPage extends StatefulWidget {
   const AllCoursesPage({Key? key}) : super(key: key);
@@ -12,61 +137,90 @@ class _AllCoursesPageState extends State<AllCoursesPage> {
   final TextEditingController _searchController = TextEditingController();
   String _selectedCategory = '';
   String _searchQuery = '';
+  List<Category> _categories = [];
+  List<Course> _courses = [];
+  bool _isLoading = true;
+  String _errorMessage = '';
 
-  final List<Map<String, dynamic>> _courses = [
-    {
-      'title': "Introduction à Flutter",
-      'description': "Découvrez les bases de Flutter pour le développement multiplateforme.",
-      'imageUrl': "assets/images/b7.png",
-      'category': "UI",
-    },
-    {
-      'title': "Les meilleures pratiques en UI/UX",
-      'description': "Apprenez à créer des interfaces utilisateur intuitives et esthétiques.",
-      'imageUrl': "assets/images/b8.png",
-      'category': "UI",
-    },
-    {
-      'title': "Développement backend avec Node.js",
-      'description': "Créez des APIs robustes avec Node.js et Express.",
-      'imageUrl': "assets/images/b7.png",
-      'category': "Business",
-    },
-    {
-      'title': "Gestion de state avec Provider",
-      'description': "Maîtrisez la gestion d'état dans vos applications Flutter.",
-      'imageUrl': "assets/images/b8.png",
-      'category': "UX",
-    },
-    {
-      'title': "Marketing digital pour débutants",
-      'description': "Apprenez les bases du marketing digital et des réseaux sociaux.",
-      'imageUrl': "assets/images/b7.png",
-      'category': "Marketing",
-    },
-    {
-      'title': "Yoga et méditation",
-      'description': "Découvrez comment améliorer votre bien-être quotidien.",
-      'imageUrl': "assets/images/b8.png",
-      'category': "Lifestyle",
-    },
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _fetchData();
+  }
 
-  final List<Map<String, dynamic>> _categories = [
-    {'name': 'UI', 'count': '25+ Courses', 'icon': Icons.design_services, 'color': const Color(0xFFFFF2E6)},
-    {'name': 'Business', 'count': '80+ Courses', 'icon': Icons.business, 'color': const Color(0xFFE6F7FF)},
-    {'name': 'Lifestyle', 'count': '120+ Courses', 'icon': Icons.spa, 'color': const Color(0xFFF0FFE6)},
-    {'name': 'Marketing', 'count': '50+ Courses', 'icon': Icons.trending_up, 'color': const Color(0xFFFFE6F7)},
-    {'name': 'UX', 'count': '145+ Courses', 'icon': Icons.psychology, 'color': const Color(0xFFF0E6FF)},
-    {'name': 'Social', 'count': '15+ Courses', 'icon': Icons.people, 'color': const Color(0xFFFFF7E6)},
-  ];
+  Future<void> _fetchData() async {
+    try {
+      final HttpClient client = HttpClient()
+        ..badCertificateCallback =
+            (X509Certificate cert, String host, int port) => true;
 
-  List<Map<String, dynamic>> get _filteredCourses {
+      final ioClient = IOClient(client);
+
+      // Fetch categories
+      final categoriesResponse = await ioClient.get(
+        Uri.parse('https://192.168.1.128:5001/api/Category'),
+        headers: {'Accept': 'application/json'},
+      );
+      print('Statut des catégories : ${categoriesResponse.statusCode}');
+      print('Corps des catégories : ${categoriesResponse.body}');
+
+      if (categoriesResponse.statusCode == 200) {
+        final List<dynamic> decoded = json.decode(categoriesResponse.body);
+        final List<Category> categoriesDataList =
+            decoded.map((json) => Category.fromJson(json as Map<String, dynamic>)).toList();
+
+        setState(() {
+          _categories = categoriesDataList;
+        });
+
+        // Fetch courses
+        final coursesResponse = await ioClient.get(
+          Uri.parse('https://192.168.1.128:5001/api/Course'),
+          headers: {'Accept': 'application/json'},
+        );
+        print('Statut des cours : ${coursesResponse.statusCode}');
+        print('Corps des cours : ${coursesResponse.body}');
+
+        if (coursesResponse.statusCode == 200) {
+          final dynamic coursesDecoded = json.decode(coursesResponse.body);
+          List<dynamic> coursesData;
+          if (coursesDecoded is List) {
+            coursesData = coursesDecoded;
+          } else if (coursesDecoded is Map) {
+            coursesData = coursesDecoded['courses'] ?? coursesDecoded['data'] ?? [];
+          } else {
+            coursesData = [];
+          }
+          setState(() {
+            _courses = coursesData.map((json) => Course.fromJson(json)).toList();
+            _isLoading = false;
+          });
+        } else {
+          setState(() {
+            _isLoading = false;
+            _errorMessage = 'Erreur de chargement des cours : ${coursesResponse.statusCode}';
+          });
+        }
+      } else {
+        setState(() {
+          _isLoading = false;
+          _errorMessage = 'Erreur de chargement des catégories : ${categoriesResponse.statusCode}';
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'Erreur de connexion : $e';
+      });
+    }
+  }
+
+  List<Course> get _filteredCourses {
     return _courses.where((course) {
-      final matchesCategory = _selectedCategory.isEmpty || course['category'] == _selectedCategory;
+      final matchesCategory = _selectedCategory.isEmpty || course.category == _selectedCategory;
       final matchesSearch = _searchQuery.isEmpty ||
-          course['title'].toLowerCase().contains(_searchQuery.toLowerCase()) ||
-          course['description'].toLowerCase().contains(_searchQuery.toLowerCase());
+          course.courseName.toLowerCase().contains(_searchQuery.toLowerCase()) ||
+          course.courseDescription.toLowerCase().contains(_searchQuery.toLowerCase());
       return matchesCategory && matchesSearch;
     }).toList();
   }
@@ -80,9 +234,9 @@ class _AllCoursesPageState extends State<AllCoursesPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-            backgroundColor: Colors.white,
-
+      backgroundColor: Colors.white,
       appBar: AppBar(
+        forceMaterialTransparency: true,
         title: Container(
           height: 40,
           decoration: BoxDecoration(
@@ -130,72 +284,67 @@ class _AllCoursesPageState extends State<AllCoursesPage> {
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
-            SizedBox(
-              height: 280,
-              child: GridView.count(
-                physics: const NeverScrollableScrollPhysics(),
-                crossAxisCount: 2,
-                crossAxisSpacing: 10,
-                mainAxisSpacing: 10,
-                childAspectRatio: 2.5,
-                children: _categories.map((category) {
-                  return GestureDetector(
-                    onTap: () {
-                      setState(() {
-                        _selectedCategory = _selectedCategory == category['name'] ? '' : category['name'];
-                      });
-                    },
-                    child: _buildCategoryItem(
-                      category['name'],
-                      category['count'],
-                      category['icon'],
-                      category['color'],
-                      isSelected: _selectedCategory == category['name'],
-                    ),
-                  );
-                }).toList(),
-              ),
-            ),
+            _buildCategoriesSection(),
             const SizedBox(height: 24),
             const Text(
               'Toutes les formations',
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
-            if (_filteredCourses.isEmpty)
-              const Padding(
-                padding: EdgeInsets.all(16.0),
-                child: Center(
-                  child: Text(
-                    'Aucun cours trouvé',
-                    style: TextStyle(fontSize: 16, color: Colors.grey),
-                  ),
-                ),
-              )
-            else
-              ..._filteredCourses.map((course) {
-                return Column(
-                  children: [
-                    _buildArticleCard(
-                      context: context,
-                      title: course['title'],
-                      description: course['description'],
-                      imageUrl: course['imageUrl'],
-                    ),
-                    const SizedBox(height: 16),
-                  ],
-                );
-              }).toList(),
+            _buildCoursesList(),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildCategoryItem(String category, String coursesCount, IconData icon, Color backgroundColor, {bool isSelected = false}) {
+  Widget _buildCategoriesSection() {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_errorMessage.isNotEmpty) {
+      return Center(
+        child: Column(
+          children: [
+            Text(_errorMessage),
+            ElevatedButton(
+              onPressed: _fetchData,
+              child: const Text('Réessayer'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return SizedBox(
+      height: 280,
+      child: GridView.count(
+        physics: const NeverScrollableScrollPhysics(),
+        crossAxisCount: 2,
+        crossAxisSpacing: 10,
+        mainAxisSpacing: 10,
+        childAspectRatio: 2.5,
+        children: _categories.map((category) {
+          return GestureDetector(
+            onTap: () {
+              setState(() {
+                _selectedCategory = _selectedCategory == category.name ? '' : category.name;
+              });
+            },
+            child: _buildCategoryItem(category),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  Widget _buildCategoryItem(Category category) {
+    final isSelected = _selectedCategory == category.name;
+
     return Container(
       decoration: BoxDecoration(
-        color: isSelected ? backgroundColor.withOpacity(0.7) : backgroundColor,
+        color: isSelected ? category.color.withOpacity(0.7) : category.color,
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
@@ -206,7 +355,7 @@ class _AllCoursesPageState extends State<AllCoursesPage> {
           ),
         ],
         border: isSelected
-            ? Border.all(color: _getIconColor(backgroundColor), width: 2)
+            ? Border.all(color: _getIconColor(category.color), width: 2)
             : null,
       ),
       child: Padding(
@@ -227,20 +376,69 @@ class _AllCoursesPageState extends State<AllCoursesPage> {
                   ),
                 ],
               ),
-              child: Icon(icon, color: _getIconColor(backgroundColor), size: 20),
+              child: Icon(category.icon, color: _getIconColor(category.color), size: 20),
             ),
             const SizedBox(width: 12),
             Column(
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(category, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                Text(coursesCount, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                Text(category.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
               ],
             ),
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildCoursesList() {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_errorMessage.isNotEmpty) {
+      return Center(
+        child: Column(
+          children: [
+            Text(_errorMessage),
+            ElevatedButton(
+              onPressed: _fetchData,
+              child: const Text('Réessayer'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_filteredCourses.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.all(16.0),
+        child: Center(
+          child: Text(
+            'Aucun cours trouvé',
+            style: TextStyle(fontSize: 16, color: Colors.grey),
+          ),
+        ),
+      );
+    }
+
+    return Column(
+      children: _filteredCourses.map((course) {
+        return Column(
+          children: [
+            _buildArticleCard(
+              context: context,
+              title: course.courseName,
+              description: course.courseDescription,
+              imageUrl: course.imageCourse,
+              courseId: course.id, // Pass courseId
+              instructor: course.formateur, // Pass formateur as instructor
+            ),
+            const SizedBox(height: 16),
+          ],
+        );
+      }).toList(),
     );
   }
 
@@ -258,6 +456,8 @@ class _AllCoursesPageState extends State<AllCoursesPage> {
     required String title,
     required String description,
     required String imageUrl,
+    required int courseId, // Add courseId parameter
+    required String instructor, // Add instructor parameter
   }) {
     return Card(
       color: Colors.white,
@@ -268,7 +468,12 @@ class _AllCoursesPageState extends State<AllCoursesPage> {
         children: [
           ClipRRect(
             borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
-            child: Image.asset(imageUrl, height: 150, width: double.infinity, fit: BoxFit.cover),
+            child: Image.asset(
+              imageUrl.startsWith('assets/') ? imageUrl : 'assets/images/b7.png',
+              height: 150,
+              width: double.infinity,
+              fit: BoxFit.cover,
+            ),
           ),
           Padding(
             padding: const EdgeInsets.all(12),
@@ -290,7 +495,9 @@ class _AllCoursesPageState extends State<AllCoursesPage> {
                             builder: (_) => DetailPage(
                               title: title,
                               description: description,
-                              imageUrl: imageUrl,
+                              imageUrl: imageUrl.startsWith('assets/') ? imageUrl : 'assets/images/b7.png',
+                              instructor: instructor, // Pass instructor
+                              courseId: courseId, // Pass courseId
                             ),
                           ),
                         );

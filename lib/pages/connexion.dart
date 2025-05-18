@@ -1,34 +1,36 @@
+import 'dart:developer';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mon_elearning/pages/navigation_bar.dart';
 import 'dart:ui';
 import 'package:mon_elearning/pages/profile_page.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/io_client.dart';
+import 'dart:io';
+import 'dart:convert';
+import 'package:jwt_decoder/jwt_decoder.dart';
 
-// enum Role { parents, students }
+enum Role { parents, students }
 
-class SignInPage extends StatelessWidget {
-  final TextEditingController _emailController = TextEditingController();
-  final TextEditingController _passwordController = TextEditingController();
-  final _formKey = GlobalKey<FormState>();
-
-  final List<Map<String, dynamic>> _validUsers = [
-    {
-      'email': 'etudiant@ecole.com',
-      'password': 'etudiant123',
-      'name': 'Étudiant Test',
-      'role': Role.students
-    },
-    {
-      'email': 'parent@ecole.com',
-      'password': 'parent123',
-      'name': 'Parent Test',
-      'role': Role.parents
-    },
-  ];
+class SignInPage extends StatefulWidget {
 
   SignInPage({super.key});
 
+  @override
+  State<SignInPage> createState() => _SignInPageState();
+}
+
+class _SignInPageState extends State<SignInPage> {
+  final TextEditingController _emailController = TextEditingController();
+
+  final TextEditingController _passwordController = TextEditingController();
+
+  final _formKey = GlobalKey<FormState>();
+
+  bool _isLoading = false;
+  bool _isVisible = true;
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -42,6 +44,7 @@ class SignInPage extends StatelessWidget {
               _buildBackgroundImage(),
               _buildBlurOverlay(),
               _buildLoginForm(context),
+              if (_isLoading) _buildLoadingIndicator(),
             ],
           ),
         ),
@@ -61,6 +64,17 @@ class SignInPage extends StatelessWidget {
       filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
       child: Container(
         color: Colors.black.withOpacity(0.3),
+      ),
+    );
+  }
+
+  Widget _buildLoadingIndicator() {
+    return Container(
+      color: Colors.black.withOpacity(0.5),
+      child: const Center(
+        child: CircularProgressIndicator(
+          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+        ),
       ),
     );
   }
@@ -88,9 +102,7 @@ class SignInPage extends StatelessWidget {
                 const SizedBox(height: 30),
                 _buildLoginButton(context),
                 const SizedBox(height: 15),
-                _buildForgotPasswordButton(),
-                const SizedBox(height: 20),
-                _buildSignUpPrompt(context),
+                _buildForgotPasswordButton(context),
               ],
             ),
           ),
@@ -145,12 +157,18 @@ class SignInPage extends StatelessWidget {
   Widget _buildPasswordField() {
     return TextFormField(
       controller: _passwordController,
-      obscureText: true,
+      obscureText: _isVisible,
       style: const TextStyle(color: Colors.white),
       decoration: InputDecoration(
         labelText: 'Mot de passe',
         labelStyle: const TextStyle(color: Colors.white),
         prefixIcon: const Icon(Icons.lock, color: Colors.white),
+        suffixIcon: IconButton(onPressed: (){
+          
+          setState((){
+            _isVisible = !_isVisible;
+          });
+        }, icon: Icon(_isVisible ?Icons.visibility :Icons.visibility_off,color:Colors.white)),
         border: const OutlineInputBorder(
           borderRadius: BorderRadius.all(Radius.circular(15)),
         ),
@@ -176,27 +194,36 @@ class SignInPage extends StatelessWidget {
 
   Widget _buildLoginButton(BuildContext context) {
     return ElevatedButton(
-      onPressed: () => _attemptLogin(context),
+      onPressed: _isLoading ? null : () => _attemptLogin(context),
       style: ElevatedButton.styleFrom(
         backgroundColor: const Color.fromARGB(255, 3, 76, 133),
         padding: const EdgeInsets.symmetric(horizontal: 50, vertical: 15),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(30)),
         ),
-      child: const Text(
-        'Se connecter',
-        style: TextStyle(
-          fontSize: 18,
-          color: Colors.white,
-        ),
-      ),
+      child: _isLoading
+          ? const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+              ),
+            )
+          : const Text(
+              'Se connecter',
+              style: TextStyle(
+                fontSize: 18,
+                color: Colors.white,
+              ),
+            ),
     );
   }
 
-  Widget _buildForgotPasswordButton() {
+  Widget _buildForgotPasswordButton(BuildContext context) {
     return TextButton(
       onPressed: () {
-        // TODO: Implémenter la récupération de mot de passe
+        Navigator.pushNamed(context, '/mdp_oublie');
       },
       child: const Text(
         'Mot de passe oublié ?',
@@ -209,65 +236,85 @@ class SignInPage extends StatelessWidget {
     );
   }
 
-  Widget _buildSignUpPrompt(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        const Text(
-          'Pas de compte ? ',
-          style: TextStyle(color: Colors.white),
-        ),
-        GestureDetector(
-          onTap: () {
-            Navigator.pushNamed(context, '/signup');
-          },
-          child: const Text(
-            'S\'inscrire',
-            style: TextStyle(
-              color: Colors.blueAccent,
-              fontWeight: FontWeight.bold,
-              decoration: TextDecoration.underline,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
   Future<void> _attemptLogin(BuildContext context) async {
     if (_formKey.currentState!.validate()) {
+      setState(() {
+        _isLoading = true;
+      });
+
       final email = _emailController.text.trim();
       final password = _passwordController.text.trim();
-      
-      final user = _validUsers.firstWhere(
-        (u) => u['email'] == email && u['password'] == password,
-        orElse: () => {},
-      );
 
-      if (user.isNotEmpty) {
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('userEmail', user['email']);
-        await prefs.setString('userName', user['name']);
-        await prefs.setString('userRole', user['role'].toString());
+      try {
+        final HttpClient client = HttpClient()
+          ..badCertificateCallback = 
+              (X509Certificate cert, String host, int port) => true;
         
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (context) => HomeScreen(user: user),
-          ),
+        final ioClient = IOClient(client);
+        
+        final response = await ioClient.post(
+          Uri.parse('https://192.168.1.128:5001/api/Users/login'),
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+          body: json.encode({
+            'email': email,
+            'password': password,
+          }),
         );
-      } else {
-        _showErrorDialog(context);
+
+        if (response.statusCode == 200) {
+          final responseData = json.decode(response.body);
+          final token = responseData['token'];
+          
+          // Décoder le token pour obtenir l'ID
+          final decodedToken = JwtDecoder.decode(token);
+          final userId = decodedToken['nameid'];
+          final role = decodedToken['role'];
+
+          
+          debugPrint('Token reçu: $token');
+          debugPrint('ID utilisateur extrait: $userId');
+
+          // Sauvegarder le token, l'ID et les infos utilisateur
+          final prefs = await SharedPreferences.getInstance();
+
+          await prefs.setString('authToken', token);
+          await prefs.setString('userEmail', email);
+          await prefs.setInt('userId', int.parse(userId));
+          
+
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (context) => HomeScreen(user: {
+                'id': userId,
+                'email': email,
+                'role': role,
+              }),
+            ),
+          );
+        } else {
+          final errorData = json.decode(response.body);
+          _showErrorDialog(context, errorData['message'] ?? 'Email ou mot de passe incorrect');
+        }
+      } catch (e) {
+        _showErrorDialog(context, 'Erreur de connexion: ${e.toString()}');
+      } finally {
+        setState(() {
+          _isLoading = false;
+        });
       }
     }
   }
 
-  void _showErrorDialog(BuildContext context) {
+  void _showErrorDialog(BuildContext context, String message) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Erreur'),
-        content: const Text('Email ou mot de passe incorrect.'),
+        content: Text(message),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
@@ -277,4 +324,5 @@ class SignInPage extends StatelessWidget {
       ),
     );
   }
+
 }
